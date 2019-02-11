@@ -5,39 +5,30 @@
  */
 package main;
 
-import java.sql.ResultSet;
 import java.util.ArrayList;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 import org.json.JSONObject;
+import dao.DAO;
+import model.*;
 
 public class Main {
 
-    public static DB db = new DB();
-    public static ArrayList<Integer> challenges = new ArrayList<>();
-    public static ArrayList<Integer> hackers = new ArrayList<>();
+    public static DAO dao = new DAO();
+    public static ArrayList<Integer> challenges;
+    public static ArrayList<Integer> hackers;
 
     public static void main(String[] args) throws Exception {
+        challenges = dao.getListChallengeId();
+        hackers = dao.getListHackerId();
         crawlListChallenge();
     }
 
     public static void crawlListChallenge() throws Exception {
-        String sql = "select * from challenge";
-        ResultSet rs = db.executeSelect(sql);
-        while (rs.next()) {
-            challenges.add(rs.getInt("id"));
-        }
-
-        String sql2 = "select * from hacker";
-        ResultSet rs2 = db.executeSelect(sql2);
-        while (rs2.next()) {
-            hackers.add(rs2.getInt("id"));
-        }
-
+        Challenge challenge = new Challenge();
         int index = 0;
-        while (true) {
+        while (index < 100) {
             String algorithmJson = Jsoup.connect("https://www.hackerrank.com/rest/contests/master/tracks/algorithms/challenges?offset=" + index).ignoreContentType(true).execute().body();
             try {
                 JSONObject obj = new JSONObject(algorithmJson);
@@ -50,12 +41,19 @@ public class Main {
                         Document doc = Jsoup.connect(problemLink).get();
                         Element content = doc.select("div.challenge-body-html").first();
                         content.select("style").remove();
-                        if (challenges.contains(challengeObj.getInt("id"))) {
-                            db.updateChallenge(challengeObj.getInt("id"), challengeObj.getString("name"), challengeObj.getDouble("difficulty"), challengeObj.getInt("max_score"), content.html());                          
+
+                        challenge.setId(challengeObj.getInt("id"));
+                        challenge.setName(challengeObj.getString("name"));
+                        challenge.setDifficulty(challengeObj.getDouble("difficulty"));
+                        challenge.setMax_score(challengeObj.getInt("max_score"));
+                        challenge.setContent(content.html());
+
+                        if (challenges.contains(challenge.getId())) {
+                            dao.updateChallenge(challenge);
                         } else {
-                            db.insertChallenge(challengeObj.getInt("id"), challengeObj.getString("name"), challengeObj.getDouble("difficulty"), challengeObj.getInt("max_score"), content.html());
+                            dao.insertChallenge(challenge);
                         }
-                        crawlHacker(url, challengeObj.getInt("id"));
+                        crawlHacker(url, challenge.getId());
                     }
                     index += obj.getJSONArray("models").length();
                 } else {
@@ -70,30 +68,41 @@ public class Main {
 
     }
 
-    public static void crawlHacker(String url, int challenge_id) throws Exception{
+    public static void crawlHacker(String url, int challenge_id) throws Exception {
+        Hacker hacker = new Hacker();
+        LeaderBoard leaderBoard = new LeaderBoard();
         int index = 0;
-        while (true) {
-            String leaderBoardJson = Jsoup.connect(url+"/leaderboard?offset=" + index).ignoreContentType(true).execute().body();
+        while (index < 100) {
+            String leaderBoardJson = Jsoup.connect(url + "/leaderboard?offset=" + index).ignoreContentType(true).execute().body();
             try {
                 JSONObject obj = new JSONObject(leaderBoardJson);
                 JSONObject hackerObj;
                 if (obj.getJSONArray("models").length() > 0) {
                     for (int j = 0; j < obj.getJSONArray("models").length(); j++) {
                         hackerObj = obj.getJSONArray("models").getJSONObject(j);
-                        int hacker_id = hackerObj.getInt("hacker_id");
-                        String hacker_name = hackerObj.getString("hacker");
-                        String hacker_country = hackerObj.get("country").toString();
+                        hacker.setId(hackerObj.getInt("hacker_id"));
+                        hacker.setName(hackerObj.getString("hacker"));
+                        hacker.setCountry(hackerObj.get("country").toString());
+                        hacker.setSchool(hackerObj.get("school").toString());
+                        hacker.setCompany(hackerObj.get("company").toString());
+                        hacker.setLanguage(hackerObj.getString("language"));
+
                         double score = hackerObj.getDouble("score");
-                        if(hackers.contains(hacker_id)){
-                            if(db.getScore(challenge_id, hacker_id)==null)
-                                db.insertLeaderBoard(challenge_id, hacker_id, score);
-                            else
-                                db.updateLeaderBoard(challenge_id, hacker_id, score);
-                        }
-                        else {
-                            hackers.add(hacker_id);
-                            db.insertHacker(hacker_id, hacker_name, hacker_country);
-                            db.insertLeaderBoard(challenge_id, hacker_id, score);
+                        leaderBoard.setChallenge_id(challenge_id);
+                        leaderBoard.setHacker_id(hacker.getId());
+                        leaderBoard.setScore(score);
+                        leaderBoard.setHacker_index(hackerObj.getInt("index"));
+
+                        if (hackers.contains(hacker.getId())) {
+                            if (dao.getScore(challenge_id, hacker.getId()) == null) {
+                                dao.insertLeaderBoard(leaderBoard);
+                            } else {
+                                dao.updateLeaderBoard(leaderBoard);
+                            }
+                        } else {
+                            hackers.add(hacker.getId());
+                            dao.insertHacker(hacker);
+                            dao.insertLeaderBoard(leaderBoard);
                         }
                     }
                     index += obj.getJSONArray("models").length();
@@ -107,5 +116,5 @@ public class Main {
             }
         }
     }
-    
+
 }
